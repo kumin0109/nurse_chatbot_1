@@ -6,7 +6,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from openai import OpenAI
 from collections import defaultdict
 
-# 🔐 OpenAI API 키 설정 및 클라이언트 생성
+# 🔐 OpenAI API 클라이언트 생성
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 # 📥 CSV 불러오기 (캐싱)
@@ -19,11 +19,15 @@ def load_data():
 
 # 텍스트를 벡터로 변환 (임베딩)
 def embed_text(text):
-    response = client.embeddings.create(
-        model="text-embedding-3-large",
-        input=text
-    )
-    return response.data[0].embedding
+    try:
+        response = client.embeddings.create(
+            input=text,
+            model="text-embedding-3-large"
+        )
+        return response.data[0].embedding
+    except Exception as e:
+        st.error(f"❌ OpenAI API 호출 중 오류 발생: {e}")
+        return None
 
 # 유사도 계산
 def find_most_similar(user_embedding, df):
@@ -94,7 +98,7 @@ if st.session_state.quiz_finished:
     if st.button("🔁 처음부터 다시 시작하기"):
         for key in list(st.session_state.keys()):
             del st.session_state[key]
-        st.rerun()
+        st.experimental_rerun()
 
 # ===== 진행 중 =====
 else:
@@ -113,7 +117,7 @@ else:
         if idx < len(df) - 1:
             if st.button("➡ 다음 문제"):
                 st.session_state.current_idx += 1
-                st.rerun()
+                st.experimental_rerun()
         else:
             st.write("마지막 문제입니다.")
 
@@ -125,8 +129,10 @@ else:
 
             for i, user_ans in st.session_state.answers.items():
                 user_embedding = embed_text(user_ans)
-                best_match, similarity = find_most_similar(user_embedding, df)
+                if user_embedding is None:  # API 호출 실패 시 스킵
+                    continue
 
+                best_match, similarity = find_most_similar(user_embedding, df)
                 is_correct = similarity >= 0.8
                 if is_correct:
                     correct_count += 1
@@ -142,4 +148,6 @@ else:
                 "category_stats": category_stats
             }
             st.session_state.quiz_finished = True
-            st.rerun()
+            st.experimental_rerun()
+
+
