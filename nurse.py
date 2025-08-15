@@ -7,24 +7,44 @@ from sklearn.metrics.pairwise import cosine_similarity
 from openai import OpenAI
 from collections import defaultdict
 
-# 🔐 OpenAI API 키 체크 (Cloud/로컬 모두 호환)
+# ==========================
+# 🔐 OpenAI API 키 & 조직 설정
+# ==========================
 try:
     api_key = st.secrets["OPENAI_API_KEY"].strip()
 except KeyError:
     st.error("❌ OPENAI_API_KEY가 설정되지 않았습니다.\nStreamlit Cloud에서는 Secrets에 설정하세요.")
     st.stop()
 
+# ✅ 키 기본 유효성 검사
 if not api_key.startswith("sk-") or len(api_key) < 40:
     st.error("❌ OPENAI_API_KEY 값이 유효하지 않습니다. 다시 확인하세요.")
     st.stop()
 
-# 환경변수로도 설정 → OpenAI 라이브러리 기본 방식 사용
+# 환경변수 등록
 os.environ["OPENAI_API_KEY"] = api_key
 
-# OpenAI 클라이언트 초기화
-client = OpenAI()
+# 👉 본인 organization ID로 교체
+ORG_ID = "org_xxxxxxxxxxxxxxxxx"  # OpenAI 계정 settings에서 확인
 
+# OpenAI 클라이언트 초기화
+client = OpenAI(api_key=api_key, organization=ORG_ID)
+
+# ==========================
+# 🔍 API 연결 테스트
+# ==========================
+with st.spinner("🔍 OpenAI API 키 및 조직 확인 중..."):
+    try:
+        models = client.models.list()
+        st.success(f"✅ API 인증 성공! 모델 {len(models.data)}개 확인됨. (예: {models.data[0].id})")
+        st.caption(f"🔑 키 앞부분: {api_key[:7]}..., 조직: {ORG_ID}")
+    except Exception as e:
+        st.error(f"❌ API 인증 실패: {e}")
+        st.stop()
+
+# ==========================
 # 📥 CSV 불러오기 (캐싱)
+# ==========================
 @st.cache_data
 def load_data():
     df = pd.read_csv("nurse_2_with_embeddings.csv")
@@ -50,7 +70,9 @@ def find_most_similar(user_embedding, df):
     best_idx = int(np.argmax(sims))
     return df.iloc[best_idx], sims[best_idx]
 
-# 페이지 설정
+# ==========================
+# 🖥 페이지 설정
+# ==========================
 st.set_page_config(page_title="간호사 상황극 문제은행", page_icon="🩺")
 st.title("🩺 간호사 100문 100답 - 카테고리 선택 문제은행")
 
@@ -182,4 +204,5 @@ else:
             }
             st.session_state.quiz_finished = True
             st.experimental_rerun()
+
 
