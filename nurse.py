@@ -2,15 +2,15 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import ast
+import os
 from sklearn.metrics.pairwise import cosine_similarity
 from openai import OpenAI
 from collections import defaultdict
-import os
 
-# 🔐 OpenAI API 클라이언트 생성
+# 🔐 OpenAI API 키 설정 (st.secrets 없으면 환경변수 사용)
 api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
 if not api_key:
-    st.error("❌ OpenAI API 키가 설정되지 않았습니다. Streamlit secrets 또는 환경변수를 확인하세요.")
+    st.error("❌ OpenAI API Key가 설정되지 않았습니다. secrets 또는 환경변수를 확인하세요.")
     st.stop()
 
 client = OpenAI(api_key=api_key)
@@ -23,19 +23,19 @@ def load_data():
     df["Etc"] = df[["Category1", "Category2", "Department"]].fillna("").astype(str).agg(";".join, axis=1)
     return df
 
-# 텍스트 → 벡터 변환 (오류 처리 추가)
-def embed_text(text):
+# 🧠 텍스트 → 임베딩 변환
+def embed_text(text: str) -> list:
     try:
         response = client.embeddings.create(
-            input=text,
-            model="text-embedding-3-large"
+            model="text-embedding-3-large",
+            input=text
         )
         return response.data[0].embedding
     except Exception as e:
-        st.error(f"❌ 임베딩 생성 중 오류 발생: {type(e).__name__} - {e}")
+        st.error(f"임베딩 생성 중 오류 발생: {e}")
         return None
 
-# 유사도 계산
+# 🎯 유사도 계산
 def find_most_similar(user_embedding, df):
     all_embeddings = np.array(df["Embedding"].to_list())
     sims = cosine_similarity([user_embedding], all_embeddings)[0]
@@ -121,15 +121,13 @@ else:
 
     col1, col2, col3 = st.columns(3)
 
-    # 정답 제출 (문제별 채점)
+    # 정답 제출
     with col1:
         if st.button("✅ 제출하고 채점"):
             if answer.strip():
                 with st.spinner("AI가 채점 중입니다..."):
                     user_embedding = embed_text(answer)
-                    if user_embedding is None:
-                        st.warning("임베딩 생성에 실패했습니다. API 키 또는 네트워크 상태를 확인하세요.")
-                    else:
+                    if user_embedding:
                         best_match, similarity = find_most_similar(user_embedding, df)
 
                         is_correct = similarity >= 0.65
@@ -143,12 +141,12 @@ else:
                         st.markdown(f"**정답 예시:** {best_match['Answer']}")
                         st.caption(f"🗂️ 카테고리: {best_match['Etc']}")
 
-                        # 카테고리별 통계 업데이트
+                        # 카테고리별 통계
                         st.session_state.category_stats[best_match["Etc"]]["total"] += 1
                         if is_correct:
                             st.session_state.category_stats[best_match["Etc"]]["correct"] += 1
 
-    # 다음 문제 버튼
+    # 다음 문제
     with col2:
         if idx < len(df) - 1:
             if st.button("➡ 다음 문제"):
@@ -157,7 +155,7 @@ else:
         else:
             st.write("마지막 문제입니다.")
 
-    # 모든 문제 채점 종료 버튼
+    # 최종 결과
     with col3:
         if st.button("📊 최종 결과 보기"):
             correct_count = 0
@@ -165,7 +163,10 @@ else:
                 if ans.strip():
                     emb = embed_text(ans)
                     if emb is not None:
-                        if cosine_similarity([emb], np.array(df["Embedding"].to_list()))[0].max() >= 0.65:
+                        sim = cosine_similarity(
+                            [emb], np.array(df["Embedding"].to_list())
+                        )[0].max()
+                        if sim >= 0.65:
                             correct_count += 1
 
             st.session_state.results = {
