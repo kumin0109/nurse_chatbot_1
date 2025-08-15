@@ -1,82 +1,167 @@
-import os
 import streamlit as st
 import pandas as pd
 import numpy as np
-from openai import OpenAI
+import ast
+import os
 from sklearn.metrics.pairwise import cosine_similarity
+from openai import OpenAI
+from collections import defaultdict
 
-# =========================
-# 1. API Key 설정
-# =========================
-api_key = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+# 🔐 OpenAI API 클라이언트 생성 (secrets 또는 환경변수)
+api_key = st.secrets.get("OPENAI_API_KEY", None) or os.getenv("OPENAI_API_KEY")
 if not api_key:
-    st.error("❌ OPENAI_API_KEY가 없습니다. Streamlit secrets 또는 환경변수에 추가하세요.")
+    st.error("❌ OPENAI_API_KEY가 없습니다. secrets.toml 또는 환경변수에 추가하세요.")
     st.stop()
-
 client = OpenAI(api_key=api_key)
 
-# =========================
-# 2. CSV 불러오기 + 임베딩 처리
-# =========================
+# 📥 CSV 불러오기 (캐싱)
 @st.cache_data
 def load_data():
-    df = pd.read_csv("data.csv")  # CSV 파일명 수정
-    if "embedding" not in df.columns:
-        with st.spinner("🔍 텍스트 임베딩 생성 중..."):
-            df["embedding"] = df["content"].apply(lambda x: 
-                client.embeddings.create(
-                    input=x,
-                    model="text-embedding-3-large"
-                ).data[0].embedding
-            )
-    else:
-        df["embedding"] = df["embedding"].apply(eval)
+    df = pd.read_csv("nurse_2_with_embeddings.csv")
+    df["Embedding"] = df["Embedding"].apply(ast.literal_eval)
+    df["Etc"] = df[["Category1", "Category2", "Department"]].fillna("").astype(str).agg(";".join, axis=1)
     return df
 
-df = load_data()
-
-# =========================
-# 3. 유사도 검색 함수
-# =========================
-def find_similar_docs(query, top_k=3):
-    query_embedding = client.embeddings.create(
-        input=query,
+# 텍스트 → 벡터 변환
+def embed_text(text):
+    response = client.embeddings.create(
+        input=text,
         model="text-embedding-3-large"
-    ).data[0].embedding
+    )
+    return response.data[0].embedding
 
-    similarities = cosine_similarity(
-        [query_embedding],
-        df["embedding"].to_list()
-    )[0]
+# 유사도 계산
+def find_most_similar(user_embedding, df):
+    all_embeddings = np.array(df["Embedding"].to_list())
+    sims = cosine_similarity([user_embedding], all_embeddings)[0]
+    best_idx = int(np.argmax(sims))
+    return df.iloc[best_idx], sims[best_idx]
 
-    top_indices = np.argsort(similarities)[::-1][:top_k]
-    return df.iloc[top_indices]
+# 페이지 설정
+st.set_page_config(page_title="간호사 상황극 문제은행", page_icon="🩺")
+st.title("🩺 간호사 100문 100답 - 카테고리 선택 문제은행")
 
-# =========================
-# 4. Streamlit UI
-# =========================
-st.title("💬 Nurse Chatbot")
-user_input = st.text_input("질문을 입력하세요")
+# === 세션 초기화 ===
+if "raw_df" not in st.session_state:
+    st.session_state.raw_df = load_data()
+if "category_selected" not in st.session_state:
+    st.session_state.category_selected = "전체"
+if "filtered_df" not in st.session_state:
+    st.session_state.filtered_df = st.session_state.raw_df.copy()
+if "current_idx" not in st.session_state:
+    st.session_state.current_idx = 0
+if "answers" not in st.session_state:
+    st.session_state.answers = {}
+if "quiz_finished" not in st.session_state:
+    st.session_state.quiz_finished = False
+if "results" not in st.session_state:
+    st.session_state.results = None
+if "category_stats" not in st.session_state:
+    st.session_state.category_stats = defaultdict(lambda: {"correct": 0, "total": 0})
 
-if user_input:
-    results = find_similar_docs(user_input, top_k=3)
+# === 카테고리 목록 ===
+all_categories = set()
+for etc in st.session_state.raw_df["Etc"]:
+    all_categories.update([e.strip() for e in str(etc).split(";") if e.strip()])
 
-    context = "\n".join(results["content"].to_list())
+category_options = ["전체"] + sorted(list(all_categories))
+selected = st.selectbox("📂 푸실 문제 카테고리를 선택하세요:", category_options)
 
-    with st.spinner("🤖 답변 생성 중..."):
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "당신은 간호 도우미입니다. 제공된 문서 내용을 바탕으로 답변하세요."},
-                {"role": "user", "content": f"다음 내용을 참고해서 질문에 답하세요.\n\n{context}\n\n질문: {user_input}"}
-            ]
-        )
+# === 카테고리 변경 시 필터링 ===
+if selected != st.session_state.category_selected:
+    st.session_state.category_selected = selected
+    if selected == "전체":
+        st.session_state.filtered_df = st.session_state.raw_df.sample(frac=1).reset_index(drop=True)
+    else:
+        mask = st.session_state.raw_df["Etc"].apply(lambda x: selected in str(x))
+        st.session_state.filtered_df = st.session_state.raw_df[mask].sample(frac=1).reset_index(drop=True)
+    st.session_state.current_idx = 0
+    st.session_state.answers = {}
+    st.session_state.quiz_finished = False
+    st.session_state.results = None
+    st.session_state.category_stats = defaultdict(lambda: {"correct": 0, "total": 0})
 
-    st.subheader("💡 답변")
-    st.write(response.choices[0].message.content)
+df = st.session_state.filtered_df
+idx = st.session_state.current_idx
 
-    st.subheader("📄 참고 문서")
-    for idx, row in results.iterrows():
-        st.markdown(f"- {row['content']}")
+# ===== 퀴즈 완료 시 =====
+if st.session_state.quiz_finished:
+    correct_count = st.session_state.results["correct"]
+    total_count = len(st.session_state.answers)
+    st.success("🎉 채점이 완료되었습니다!")
+    st.markdown(f"- 총 푼 문제 수: **{total_count}**")
+    st.markdown(f"- 맞힌 문제 수: **{correct_count}**")
+    st.markdown(f"- 정답률: **{(correct_count/total_count)*100:.1f}%**")
 
+    st.subheader("🧾 카테고리별 정답 통계")
+    for cat, stat in st.session_state.results["category_stats"].items():
+        if stat["total"] > 0:
+            rate = stat["correct"] / stat["total"] * 100
+            st.write(f"- **{cat}**: {stat['correct']} / {stat['total']} 정답 ({rate:.1f}%)")
+
+    if st.button("🔁 처음부터 다시 시작하기"):
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        st.experimental_rerun()
+
+# ===== 진행 중 =====
+else:
+    row = df.iloc[idx]
+    st.markdown(f"**문제 {idx + 1}/{len(df)}:** {row['Question']}")
+
+    answer = st.text_area("🧑‍⚕️ 당신의 간호사 응답은?",
+                          value=st.session_state.answers.get(idx, ""),
+                          key=f"input_{idx}")
+    st.session_state.answers[idx] = answer
+
+    col1, col2, col3 = st.columns(3)
+
+    # 정답 제출 (문제별 채점)
+    with col1:
+        if st.button("✅ 제출하고 채점"):
+            if answer.strip():
+                with st.spinner("AI가 채점 중입니다..."):
+                    user_embedding = embed_text(answer)
+                    best_match, similarity = find_most_similar(user_embedding, df)
+
+                    is_correct = similarity >= 0.65
+                    if is_correct:
+                        st.success(f"✅ 정답입니다! (유사도: {similarity:.2f})")
+                    elif similarity >= 0.55:
+                        st.info(f"🟡 거의 맞았습니다. (유사도: {similarity:.2f})")
+                    else:
+                        st.error(f"❌ 오답입니다. (유사도: {similarity:.2f})")
+
+                    st.markdown(f"**정답 예시:** {best_match['Answer']}")
+                    st.caption(f"🗂️ 카테고리: {best_match['Etc']}")
+
+                    # 카테고리별 통계 업데이트
+                    st.session_state.category_stats[best_match["Etc"]]["total"] += 1
+                    if is_correct:
+                        st.session_state.category_stats[best_match["Etc"]]["correct"] += 1
+
+    # 다음 문제 버튼
+    with col2:
+        if idx < len(df) - 1:
+            if st.button("➡ 다음 문제"):
+                st.session_state.current_idx += 1
+                st.experimental_rerun()
+        else:
+            st.write("마지막 문제입니다.")
+
+    # 모든 문제 채점 종료 버튼
+    with col3:
+        if st.button("📊 최종 결과 보기"):
+            correct_count = sum(
+                1 for i, ans in st.session_state.answers.items()
+                if ans.strip() and cosine_similarity(
+                    [embed_text(ans)], np.array(df["Embedding"].to_list())
+                )[0].max() >= 0.65
+            )
+            st.session_state.results = {
+                "correct": correct_count,
+                "category_stats": st.session_state.category_stats
+            }
+            st.session_state.quiz_finished = True
+            st.experimental_rerun()
 
