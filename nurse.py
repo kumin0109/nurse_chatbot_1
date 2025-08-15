@@ -2,17 +2,27 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import ast
+import os
 from sklearn.metrics.pairwise import cosine_similarity
 from openai import OpenAI
 from collections import defaultdict
 
-# 🔐 OpenAI API 키 체크
-api_key = st.secrets.get("OPENAI_API_KEY")
-if not api_key:
+# 🔐 OpenAI API 키 체크 (Cloud/로컬 모두 호환)
+try:
+    api_key = st.secrets["OPENAI_API_KEY"].strip()
+except KeyError:
     st.error("❌ OPENAI_API_KEY가 설정되지 않았습니다.\nStreamlit Cloud에서는 Secrets에 설정하세요.")
     st.stop()
 
-client = OpenAI(api_key=api_key)
+if not api_key.startswith("sk-") or len(api_key) < 40:
+    st.error("❌ OPENAI_API_KEY 값이 유효하지 않습니다. 다시 확인하세요.")
+    st.stop()
+
+# 환경변수로도 설정 → OpenAI 라이브러리 기본 방식 사용
+os.environ["OPENAI_API_KEY"] = api_key
+
+# OpenAI 클라이언트 초기화
+client = OpenAI()
 
 # 📥 CSV 불러오기 (캐싱)
 @st.cache_data
