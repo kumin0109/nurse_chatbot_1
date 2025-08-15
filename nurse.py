@@ -3,11 +3,11 @@ import pandas as pd
 import numpy as np
 import ast
 from sklearn.metrics.pairwise import cosine_similarity
-import openai
+from openai import OpenAI
 from collections import defaultdict
 
-# 🔐 OpenAI API 키 설정
-openai.api_key = st.secrets["OPENAI_API_KEY"]
+# 🔐 OpenAI API 키 설정 및 클라이언트 생성
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 # 📥 CSV 불러오기 (캐싱)
 @st.cache_data
@@ -19,9 +19,9 @@ def load_data():
 
 # 텍스트를 벡터로 변환 (임베딩)
 def embed_text(text):
-    response = openai.embeddings.create(
-        input=text,
-        model="text-embedding-3-large"
+    response = client.embeddings.create(
+        model="text-embedding-3-large",
+        input=text
     )
     return response.data[0].embedding
 
