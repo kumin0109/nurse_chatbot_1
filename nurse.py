@@ -5,9 +5,11 @@ import ast
 from sklearn.metrics.pairwise import cosine_similarity
 from openai import OpenAI
 from collections import defaultdict
+import os
 
-# 🔐 OpenAI API 클라이언트 생성 (Streamlit Secrets 사용)
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+# 🔐 API 키 설정
+os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
+client = OpenAI()
 
 # 📥 CSV 불러오기 (캐싱)
 @st.cache_data
@@ -130,7 +132,6 @@ else:
                     st.markdown(f"**정답 예시:** {best_match['Answer']}")
                     st.caption(f"🗂️ 카테고리: {best_match['Etc']}")
 
-                    # 카테고리별 통계 업데이트
                     st.session_state.category_stats[best_match["Etc"]]["total"] += 1
                     if is_correct:
                         st.session_state.category_stats[best_match["Etc"]]["correct"] += 1
@@ -159,4 +160,5 @@ else:
             }
             st.session_state.quiz_finished = True
             st.experimental_rerun()
+
 
