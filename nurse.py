@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -6,8 +7,20 @@ from sklearn.metrics.pairwise import cosine_similarity
 from openai import OpenAI
 from collections import defaultdict
 
-# 🔐 OpenAI API 키 설정
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+# -----------------------------
+# OpenAI 클라이언트 안전 초기화
+# -----------------------------
+def get_openai_client():
+    # 1) Streamlit secrets → 2) 기존 환경변수 순서로 키 확보
+    api_key = st.secrets.get("OPENAI_API_KEY", None) or os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        st.error("OPENAI_API_KEY가 설정되어 있지 않습니다. Streamlit Secrets에 OPENAI_API_KEY를 추가하세요.")
+        st.stop()
+    # 환경변수로 주입 (클라이언트 생성 시 인자 전달 안 함)
+    os.environ["OPENAI_API_KEY"] = api_key
+    return OpenAI()
+
+client = get_openai_client()
 
 # 📥 CSV 불러오기 (캐싱)
 @st.cache_data
@@ -19,11 +32,11 @@ def load_data():
 
 # 텍스트를 벡터로 변환 (임베딩) - 최신 SDK 방식
 def embed_text(text):
-    response = client.embeddings.create(
+    resp = client.embeddings.create(
         model="text-embedding-3-large",
         input=text
     )
-    return response.data[0].embedding
+    return resp.data[0].embedding
 
 # 유사도 계산
 def find_most_similar(user_embedding, df):
@@ -94,16 +107,18 @@ if st.session_state.quiz_finished:
     if st.button("🔁 처음부터 다시 시작하기"):
         for key in list(st.session_state.keys()):
             del st.session_state[key]
-        st.experimental_rerun()
+        st.rerun()
 
 # ===== 진행 중 =====
 else:
     row = df.iloc[idx]
     st.markdown(f"**문제 {idx + 1}/{len(df)}:** {row['Question']}")
 
-    answer = st.text_area("🧑‍⚕️ 당신의 간호사 응답은?",
-                          value=st.session_state.answers.get(idx, ""),
-                          key=f"input_{idx}")
+    answer = st.text_area(
+        "🧑‍⚕️ 당신의 간호사 응답은?",
+        value=st.session_state.answers.get(idx, ""),
+        key=f"input_{idx}"
+    )
     st.session_state.answers[idx] = answer
 
     col1, col2 = st.columns(2)
@@ -113,7 +128,7 @@ else:
         if idx < len(df) - 1:
             if st.button("➡ 다음 문제"):
                 st.session_state.current_idx += 1
-                st.experimental_rerun()
+                st.rerun()
         else:
             st.write("마지막 문제입니다.")
 
@@ -142,5 +157,6 @@ else:
                 "category_stats": category_stats
             }
             st.session_state.quiz_finished = True
-            st.experimental_rerun()
+            st.rerun()
+
 
