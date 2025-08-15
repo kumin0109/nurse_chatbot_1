@@ -6,9 +6,6 @@ from sklearn.metrics.pairwise import cosine_similarity
 from openai import OpenAI
 from collections import defaultdict
 
-# 🔐 OpenAI API 클라이언트 생성
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-
 # 📥 CSV 불러오기 (캐싱)
 @st.cache_data
 def load_data():
@@ -17,17 +14,18 @@ def load_data():
     df["Etc"] = df[["Category1", "Category2", "Department"]].fillna("").astype(str).agg(";".join, axis=1)
     return df
 
+# OpenAI 클라이언트를 안전하게 생성
+def get_client():
+    return OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+
 # 텍스트를 벡터로 변환 (임베딩)
 def embed_text(text):
-    try:
-        response = client.embeddings.create(
-            input=text,
-            model="text-embedding-3-large"
-        )
-        return response.data[0].embedding
-    except Exception as e:
-        st.error(f"❌ OpenAI API 호출 중 오류 발생: {e}")
-        return None
+    client = get_client()
+    response = client.embeddings.create(
+        input=text,
+        model="text-embedding-3-large"
+    )
+    return response.data[0].embedding
 
 # 유사도 계산
 def find_most_similar(user_embedding, df):
@@ -129,10 +127,8 @@ else:
 
             for i, user_ans in st.session_state.answers.items():
                 user_embedding = embed_text(user_ans)
-                if user_embedding is None:  # API 호출 실패 시 스킵
-                    continue
-
                 best_match, similarity = find_most_similar(user_embedding, df)
+
                 is_correct = similarity >= 0.8
                 if is_correct:
                     correct_count += 1
@@ -149,5 +145,6 @@ else:
             }
             st.session_state.quiz_finished = True
             st.experimental_rerun()
+
 
 
