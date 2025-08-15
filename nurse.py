@@ -8,7 +8,7 @@ from openai import OpenAI
 from collections import defaultdict
 
 # ==========================
-# 🔐 OpenAI API 키 & 조직 설정
+# 🔐 OpenAI API 키 설정
 # ==========================
 try:
     api_key = st.secrets["OPENAI_API_KEY"].strip()
@@ -16,28 +16,25 @@ except KeyError:
     st.error("❌ OPENAI_API_KEY가 설정되지 않았습니다.\nStreamlit Cloud에서는 Secrets에 설정하세요.")
     st.stop()
 
-# ✅ 키 기본 유효성 검사
+# ✅ 키 유효성 검사
 if not api_key.startswith("sk-") or len(api_key) < 40:
     st.error("❌ OPENAI_API_KEY 값이 유효하지 않습니다. 다시 확인하세요.")
     st.stop()
 
-# 환경변수 등록
+# 환경변수 등록 (openai 기본 인증 방식)
 os.environ["OPENAI_API_KEY"] = api_key
 
-# 👉 본인 organization ID로 교체
-ORG_ID = "org_xxxxxxxxxxxxxxxxx"  # OpenAI 계정 settings에서 확인
-
 # OpenAI 클라이언트 초기화
-client = OpenAI(api_key=api_key, organization=ORG_ID)
+client = OpenAI(api_key=api_key)
 
 # ==========================
 # 🔍 API 연결 테스트
 # ==========================
-with st.spinner("🔍 OpenAI API 키 및 조직 확인 중..."):
+with st.spinner("🔍 OpenAI API 인증 확인 중..."):
     try:
         models = client.models.list()
-        st.success(f"✅ API 인증 성공! 모델 {len(models.data)}개 확인됨. (예: {models.data[0].id})")
-        st.caption(f"🔑 키 앞부분: {api_key[:7]}..., 조직: {ORG_ID}")
+        st.success(f"✅ API 인증 성공! 모델 {len(models.data)}개 확인됨 (예: {models.data[0].id})")
+        st.caption(f"🔑 키 앞부분: {api_key[:7]}..., 길이: {len(api_key)}")
     except Exception as e:
         st.error(f"❌ API 인증 실패: {e}")
         st.stop()
