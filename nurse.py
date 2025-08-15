@@ -1,20 +1,21 @@
+# nurse.py
 import os
+import requests  # ✅ SDK 대신 REST 호출
 import streamlit as st
 import pandas as pd
 import numpy as np
 import ast
 from sklearn.metrics.pairwise import cosine_similarity
-from openai import OpenAI
 from collections import defaultdict
 
-# ===== OpenAI API 키 설정 =====
-api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
-if not api_key:
+# ===== OpenAI API 키 =====
+API_KEY = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+if not API_KEY:
     st.error("❌ OpenAI API Key가 없습니다. .streamlit/secrets.toml 또는 환경변수에 설정하세요.")
     st.stop()
 
-# 최신 OpenAI SDK 클라이언트 생성
-client = OpenAI(api_key=api_key)
+EMBED_URL = "https://api.openai.com/v1/embeddings"
+EMBED_MODEL = "text-embedding-3-large"
 
 # 📥 CSV 불러오기 (캐싱)
 @st.cache_data
@@ -24,13 +25,24 @@ def load_data():
     df["Etc"] = df[["Category1", "Category2", "Department"]].fillna("").astype(str).agg(";".join, axis=1)
     return df
 
-# 텍스트를 벡터로 변환 (임베딩) - 최신 방식
-def embed_text(text):
-    response = client.embeddings.create(
-        model="text-embedding-3-large",
-        input=text
-    )
-    return response.data[0].embedding
+# 텍스트를 벡터로 변환 (임베딩) — ✅ REST로 직접 호출
+def embed_text(text: str):
+    if not text or not text.strip():
+        # 빈 입력은 0벡터로 처리(길이는 모델 출력과 동일해야 하지만
+        # 비교만 할 거라서 아주 짧은 입력으로 임베딩 생성)
+        text = " "
+    headers = {
+        "Authorization": f"Bearer {API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {"model": EMBED_MODEL, "input": text}
+    resp = requests.post(EMBED_URL, headers=headers, json=payload, timeout=30)
+    if resp.status_code != 200:
+        # 스트림릿에서 에러 보이기
+        st.error(f"Embedding API 오류: {resp.status_code} - {resp.text}")
+        st.stop()
+    data = resp.json()
+    return data["data"][0]["embedding"]
 
 # 유사도 계산
 def find_most_similar(user_embedding, df):
@@ -134,6 +146,8 @@ else:
             category_stats = defaultdict(lambda: {"correct": 0, "total": 0})
 
             for i, user_ans in st.session_state.answers.items():
+                if not user_ans or not user_ans.strip():
+                    continue  # 빈 답변은 건너뜀
                 user_embedding = embed_text(user_ans)
                 best_match, similarity = find_most_similar(user_embedding, df)
 
