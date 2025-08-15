@@ -3,11 +3,11 @@ import pandas as pd
 import numpy as np
 import ast
 from sklearn.metrics.pairwise import cosine_similarity
-import openai
+from openai import OpenAI
 from collections import defaultdict
 
-# 🔐 OpenAI API 키 설정
-openai.api_key = st.secrets["OPENAI_API_KEY"]
+# 🔐 OpenAI API 클라이언트 생성
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 # 📥 CSV 불러오기 (캐싱)
 @st.cache_data
@@ -19,11 +19,11 @@ def load_data():
 
 # 텍스트를 벡터로 변환 (임베딩)
 def embed_text(text):
-    response = openai.Embedding.create(
+    response = client.embeddings.create(
         input=text,
         model="text-embedding-3-large"
     )
-    return response["data"][0]["embedding"]
+    return response.data[0].embedding
 
 # 유사도 계산
 def find_most_similar(user_embedding, df):
@@ -94,7 +94,7 @@ if st.session_state.quiz_finished:
     if st.button("🔁 처음부터 다시 시작하기"):
         for key in list(st.session_state.keys()):
             del st.session_state[key]
-        st.experimental_rerun()
+        st.rerun()
 
 # ===== 진행 중 =====
 else:
@@ -113,7 +113,6 @@ else:
         if idx < len(df) - 1:
             if st.button("➡ 다음 문제"):
                 st.session_state.current_idx += 1
-                st.experimental_rerun()
         else:
             st.write("마지막 문제입니다.")
 
@@ -142,5 +141,5 @@ else:
                 "category_stats": category_stats
             }
             st.session_state.quiz_finished = True
-            st.experimental_rerun()
+            st.rerun()
 
