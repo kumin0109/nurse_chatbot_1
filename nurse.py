@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -6,8 +7,13 @@ from sklearn.metrics.pairwise import cosine_similarity
 from openai import OpenAI
 from collections import defaultdict
 
-# 🔐 OpenAI API 클라이언트 생성 (최신 방식)
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+# ===== OpenAI API 키 설정 (secrets → 환경변수 순서로 시도) =====
+api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
+if not api_key:
+    st.error("❌ OpenAI API Key가 없습니다. .streamlit/secrets.toml 또는 환경변수에 설정하세요.")
+    st.stop()
+
+client = OpenAI(api_key=api_key)
 
 # 📥 CSV 불러오기 (캐싱)
 @st.cache_data
@@ -17,7 +23,7 @@ def load_data():
     df["Etc"] = df[["Category1", "Category2", "Department"]].fillna("").astype(str).agg(";".join, axis=1)
     return df
 
-# 텍스트를 벡터로 변환 (임베딩)
+# 텍스트 → 벡터(임베딩)
 def embed_text(text):
     response = client.embeddings.create(
         input=text,
@@ -72,7 +78,6 @@ if selected != st.session_state.category_selected:
     st.session_state.answers = {}
     st.session_state.quiz_finished = False
     st.session_state.results = None
-    st.rerun()
 
 df = st.session_state.filtered_df
 idx = st.session_state.current_idx
@@ -93,8 +98,7 @@ if st.session_state.quiz_finished:
             st.write(f"- **{cat}**: {stat['correct']} / {stat['total']} 정답 ({rate:.1f}%)")
 
     if st.button("🔁 처음부터 다시 시작하기"):
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
+        st.session_state.clear()
         st.rerun()
 
 # ===== 진행 중 =====
@@ -102,9 +106,11 @@ else:
     row = df.iloc[idx]
     st.markdown(f"**문제 {idx + 1}/{len(df)}:** {row['Question']}")
 
-    answer = st.text_area("🧑‍⚕️ 당신의 간호사 응답은?",
-                          value=st.session_state.answers.get(idx, ""),
-                          key=f"input_{idx}")
+    answer = st.text_area(
+        "🧑‍⚕️ 당신의 간호사 응답은?",
+        value=st.session_state.answers.get(idx, ""),
+        key=f"input_{idx}"
+    )
     st.session_state.answers[idx] = answer
 
     col1, col2 = st.columns(2)
