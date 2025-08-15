@@ -13,7 +13,7 @@ if not api_key:
     st.error("❌ OpenAI API Key가 없습니다. .streamlit/secrets.toml 또는 환경변수에 설정하세요.")
     st.stop()
 
-openai.api_key = api_key  # ✅ 전역 설정 (배포 환경에서 안정적)
+openai.api_key = api_key  # 전역 키 설정
 
 # 📥 CSV 불러오기 (캐싱)
 @st.cache_data
@@ -23,9 +23,9 @@ def load_data():
     df["Etc"] = df[["Category1", "Category2", "Department"]].fillna("").astype(str).agg(";".join, axis=1)
     return df
 
-# 텍스트를 벡터로 변환 (임베딩)
+# 텍스트를 벡터로 변환 (임베딩) - 최신 SDK 방식
 def embed_text(text):
-    response = openai.Embeddings.create(  # ✅ 새로운 client 객체 안 쓰고 바로 호출
+    response = openai.embeddings.create(
         input=text,
         model="text-embedding-3-large"
     )
@@ -152,6 +152,7 @@ else:
             }
             st.session_state.quiz_finished = True
             st.rerun()
+
 
 
 
