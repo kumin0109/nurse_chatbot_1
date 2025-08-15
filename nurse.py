@@ -3,11 +3,11 @@ import pandas as pd
 import numpy as np
 import ast
 from sklearn.metrics.pairwise import cosine_similarity
-import openai
+from openai import OpenAI
 from collections import defaultdict
 
 # 🔐 OpenAI API 키 설정
-openai.api_key = st.secrets["OPENAI_API_KEY"]
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 # 📥 CSV 불러오기 (캐싱)
 @st.cache_data
@@ -17,13 +17,13 @@ def load_data():
     df["Etc"] = df[["Category1", "Category2", "Department"]].fillna("").astype(str).agg(";".join, axis=1)
     return df
 
-# 텍스트를 벡터로 변환 (임베딩)
+# 텍스트를 벡터로 변환 (임베딩) - 최신 SDK 방식
 def embed_text(text):
-    response = openai.Embedding.create(
-        input=text,
-        model="text-embedding-3-large"
+    response = client.embeddings.create(
+        model="text-embedding-3-large",
+        input=text
     )
-    return response["data"][0]["embedding"]
+    return response.data[0].embedding
 
 # 유사도 계산
 def find_most_similar(user_embedding, df):
@@ -94,7 +94,7 @@ if st.session_state.quiz_finished:
     if st.button("🔁 처음부터 다시 시작하기"):
         for key in list(st.session_state.keys()):
             del st.session_state[key]
-        st.rerun()
+        st.experimental_rerun()
 
 # ===== 진행 중 =====
 else:
@@ -113,7 +113,7 @@ else:
         if idx < len(df) - 1:
             if st.button("➡ 다음 문제"):
                 st.session_state.current_idx += 1
-                st.rerun()
+                st.experimental_rerun()
         else:
             st.write("마지막 문제입니다.")
 
@@ -142,5 +142,5 @@ else:
                 "category_stats": category_stats
             }
             st.session_state.quiz_finished = True
-            st.rerun()
+            st.experimental_rerun()
 
