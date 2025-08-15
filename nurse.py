@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 import ast
 from sklearn.metrics.pairwise import cosine_similarity
-import openai
+from openai import OpenAI
 from collections import defaultdict
 
 # ===== OpenAI API 키 설정 =====
@@ -13,7 +13,8 @@ if not api_key:
     st.error("❌ OpenAI API Key가 없습니다. .streamlit/secrets.toml 또는 환경변수에 설정하세요.")
     st.stop()
 
-openai.api_key = api_key  # 전역 키 설정
+# 최신 OpenAI SDK 클라이언트 생성
+client = OpenAI(api_key=api_key)
 
 # 📥 CSV 불러오기 (캐싱)
 @st.cache_data
@@ -23,11 +24,11 @@ def load_data():
     df["Etc"] = df[["Category1", "Category2", "Department"]].fillna("").astype(str).agg(";".join, axis=1)
     return df
 
-# 텍스트를 벡터로 변환 (임베딩) - 최신 SDK 방식
+# 텍스트를 벡터로 변환 (임베딩) - 최신 방식
 def embed_text(text):
-    response = openai.embeddings.create(
-        input=text,
-        model="text-embedding-3-large"
+    response = client.embeddings.create(
+        model="text-embedding-3-large",
+        input=text
     )
     return response.data[0].embedding
 
@@ -152,7 +153,6 @@ else:
             }
             st.session_state.quiz_finished = True
             st.rerun()
-
 
 
 
