@@ -3,11 +3,11 @@ import pandas as pd
 import numpy as np
 import ast
 from sklearn.metrics.pairwise import cosine_similarity
-from openai import OpenAI
+import openai
 from collections import defaultdict
 
-# 🔐 OpenAI API 클라이언트 생성 (신버전 SDK 방식)
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+# 🔐 OpenAI API 키 설정
+openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 # 📥 CSV 불러오기 (캐싱)
 @st.cache_data
@@ -17,13 +17,13 @@ def load_data():
     df["Etc"] = df[["Category1", "Category2", "Department"]].fillna("").astype(str).agg(";".join, axis=1)
     return df
 
-# 텍스트를 벡터로 변환 (임베딩) - 신버전 SDK
+# 텍스트를 벡터로 변환 (임베딩)
 def embed_text(text):
-    response = client.embeddings.create(
-        model="text-embedding-3-large",
-        input=text
+    response = openai.Embedding.create(
+        input=text,
+        model="text-embedding-3-large"
     )
-    return response.data[0].embedding
+    return response["data"][0]["embedding"]
 
 # 유사도 계산
 def find_most_similar(user_embedding, df):
@@ -56,8 +56,8 @@ if "results" not in st.session_state:
 all_categories = set()
 for etc in st.session_state.raw_df["Etc"]:
     all_categories.update([e.strip() for e in str(etc).split(";") if e.strip()])
-category_options = ["전체"] + sorted(list(all_categories))
 
+category_options = ["전체"] + sorted(list(all_categories))
 selected = st.selectbox("📂 푸실 문제 카테고리를 선택하세요:", category_options)
 
 # === 카테고리 변경 시 데이터 필터링 ===
@@ -80,7 +80,6 @@ idx = st.session_state.current_idx
 if st.session_state.quiz_finished:
     correct_count = st.session_state.results["correct"]
     total_count = len(st.session_state.answers)
-
     st.success("🎉 채점이 완료되었습니다!")
     st.markdown(f"- 총 푼 문제 수: **{total_count}**")
     st.markdown(f"- 맞힌 문제 수: **{correct_count}**")
@@ -95,18 +94,16 @@ if st.session_state.quiz_finished:
     if st.button("🔁 처음부터 다시 시작하기"):
         for key in list(st.session_state.keys()):
             del st.session_state[key]
-        st.rerun()
+        st.experimental_rerun()
 
 # ===== 진행 중 =====
 else:
     row = df.iloc[idx]
     st.markdown(f"**문제 {idx + 1}/{len(df)}:** {row['Question']}")
 
-    answer = st.text_area(
-        "🧑‍⚕️ 당신의 간호사 응답은?",
-        value=st.session_state.answers.get(idx, ""),
-        key=f"input_{idx}"
-    )
+    answer = st.text_area("🧑‍⚕️ 당신의 간호사 응답은?",
+                          value=st.session_state.answers.get(idx, ""),
+                          key=f"input_{idx}")
     st.session_state.answers[idx] = answer
 
     col1, col2 = st.columns(2)
@@ -116,7 +113,7 @@ else:
         if idx < len(df) - 1:
             if st.button("➡ 다음 문제"):
                 st.session_state.current_idx += 1
-                st.rerun()
+                st.experimental_rerun()
         else:
             st.write("마지막 문제입니다.")
 
@@ -129,9 +126,11 @@ else:
             for i, user_ans in st.session_state.answers.items():
                 user_embedding = embed_text(user_ans)
                 best_match, similarity = find_most_similar(user_embedding, df)
+
                 is_correct = similarity >= 0.8
                 if is_correct:
                     correct_count += 1
+
                 for category in best_match["Etc"].split(";"):
                     category = category.strip()
                     category_stats[category]["total"] += 1
@@ -143,6 +142,4 @@ else:
                 "category_stats": category_stats
             }
             st.session_state.quiz_finished = True
-            st.rerun()
-
-
+            st.experimental_rerun()
