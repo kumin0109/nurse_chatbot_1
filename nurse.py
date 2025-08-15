@@ -2,12 +2,14 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import ast
+import os
 from sklearn.metrics.pairwise import cosine_similarity
 from openai import OpenAI
 from collections import defaultdict
 
-# 🔐 OpenAI API 클라이언트 생성
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+# 🔐 OpenAI API 키 환경변수로 설정 후 클라이언트 생성
+os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
+client = OpenAI()
 
 # 📥 CSV 불러오기 (캐싱)
 @st.cache_data
@@ -119,10 +121,10 @@ else:
                     user_embedding = embed_text(answer)
                     best_match, similarity = find_most_similar(user_embedding, df)
 
-                    is_correct = similarity >= 0.65  # 🔹 0.7 → 0.65
+                    is_correct = similarity >= 0.65
                     if is_correct:
                         st.success(f"✅ 정답입니다! (유사도: {similarity:.2f})")
-                    elif similarity >= 0.55:  # 🔹 0.6 → 0.55
+                    elif similarity >= 0.55:
                         st.info(f"🟡 거의 맞았습니다. (유사도: {similarity:.2f})")
                     else:
                         st.error(f"❌ 오답입니다. (유사도: {similarity:.2f})")
@@ -151,7 +153,7 @@ else:
                 1 for i, ans in st.session_state.answers.items()
                 if ans.strip() and cosine_similarity(
                     [embed_text(ans)], np.array(df["Embedding"].to_list())
-                )[0].max() >= 0.65  # 🔹 동일하게 0.65
+                )[0].max() >= 0.65
             )
             st.session_state.results = {
                 "correct": correct_count,
@@ -159,4 +161,3 @@ else:
             }
             st.session_state.quiz_finished = True
             st.experimental_rerun()
-
