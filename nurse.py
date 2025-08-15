@@ -4,16 +4,16 @@ import pandas as pd
 import numpy as np
 import ast
 from sklearn.metrics.pairwise import cosine_similarity
-from openai import OpenAI
+import openai
 from collections import defaultdict
 
-# ===== OpenAI API 키 설정 (secrets → 환경변수 순서로 시도) =====
+# ===== OpenAI API 키 설정 =====
 api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
 if not api_key:
     st.error("❌ OpenAI API Key가 없습니다. .streamlit/secrets.toml 또는 환경변수에 설정하세요.")
     st.stop()
 
-client = OpenAI(api_key=api_key)
+openai.api_key = api_key  # 전역 키 설정
 
 # 📥 CSV 불러오기 (캐싱)
 @st.cache_data
@@ -23,9 +23,9 @@ def load_data():
     df["Etc"] = df[["Category1", "Category2", "Department"]].fillna("").astype(str).agg(";".join, axis=1)
     return df
 
-# 텍스트 → 벡터(임베딩)
+# 텍스트를 벡터로 변환 (임베딩)
 def embed_text(text):
-    response = client.embeddings.create(
+    response = openai.embeddings.create(
         input=text,
         model="text-embedding-3-large"
     )
@@ -78,6 +78,7 @@ if selected != st.session_state.category_selected:
     st.session_state.answers = {}
     st.session_state.quiz_finished = False
     st.session_state.results = None
+    st.rerun()  # experimental_rerun → rerun
 
 df = st.session_state.filtered_df
 idx = st.session_state.current_idx
@@ -98,7 +99,8 @@ if st.session_state.quiz_finished:
             st.write(f"- **{cat}**: {stat['correct']} / {stat['total']} 정답 ({rate:.1f}%)")
 
     if st.button("🔁 처음부터 다시 시작하기"):
-        st.session_state.clear()
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
         st.rerun()
 
 # ===== 진행 중 =====
