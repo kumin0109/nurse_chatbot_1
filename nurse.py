@@ -10,18 +10,14 @@ from collections import defaultdict
 # ==============================
 # 🔐 OpenAI API 키 세팅
 # ==============================
-api_key = None
 if "OPENAI_API_KEY" in st.secrets:
-    api_key = st.secrets["OPENAI_API_KEY"]
-elif os.getenv("OPENAI_API_KEY"):
-    api_key = os.getenv("OPENAI_API_KEY")
-
-if not api_key:
+    os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
+elif not os.getenv("OPENAI_API_KEY"):
     st.error("❌ OpenAI API 키가 설정되지 않았습니다.")
     st.stop()
 
-os.environ["OPENAI_API_KEY"] = api_key
-client = OpenAI(api_key=api_key)
+# 환경변수에서 자동 인식
+client = OpenAI()
 
 # 📥 CSV 불러오기 (캐싱)
 @st.cache_data
@@ -144,7 +140,6 @@ else:
                     st.markdown(f"**정답 예시:** {best_match['Answer']}")
                     st.caption(f"🗂️ 카테고리: {best_match['Etc']}")
 
-                    # 카테고리별 통계 업데이트
                     st.session_state.category_stats[best_match["Etc"]]["total"] += 1
                     if is_correct:
                         st.session_state.category_stats[best_match["Etc"]]["correct"] += 1
@@ -173,3 +168,4 @@ else:
             }
             st.session_state.quiz_finished = True
             st.experimental_rerun()
+
