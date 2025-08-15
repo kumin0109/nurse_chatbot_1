@@ -7,11 +7,21 @@ from sklearn.metrics.pairwise import cosine_similarity
 from openai import OpenAI
 from collections import defaultdict
 
-# 🔐 API 키 설정 (환경변수 & st.secrets 지원)
+# ==============================
+# 🔐 OpenAI API 키 세팅
+# ==============================
+api_key = None
 if "OPENAI_API_KEY" in st.secrets:
-    os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
+    api_key = st.secrets["OPENAI_API_KEY"]
+elif os.getenv("OPENAI_API_KEY"):
+    api_key = os.getenv("OPENAI_API_KEY")
 
-client = OpenAI()
+if not api_key:
+    st.error("❌ OpenAI API 키가 설정되지 않았습니다.")
+    st.stop()
+
+os.environ["OPENAI_API_KEY"] = api_key
+client = OpenAI(api_key=api_key)
 
 # 📥 CSV 불러오기 (캐싱)
 @st.cache_data
