@@ -6,6 +6,9 @@ from sklearn.metrics.pairwise import cosine_similarity
 from openai import OpenAI
 from collections import defaultdict
 
+# 🔐 OpenAI API 클라이언트 생성 (최신 방식)
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+
 # 📥 CSV 불러오기 (캐싱)
 @st.cache_data
 def load_data():
@@ -14,13 +17,8 @@ def load_data():
     df["Etc"] = df[["Category1", "Category2", "Department"]].fillna("").astype(str).agg(";".join, axis=1)
     return df
 
-# OpenAI 클라이언트를 안전하게 생성
-def get_client():
-    return OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-
 # 텍스트를 벡터로 변환 (임베딩)
 def embed_text(text):
-    client = get_client()
     response = client.embeddings.create(
         input=text,
         model="text-embedding-3-large"
@@ -74,6 +72,7 @@ if selected != st.session_state.category_selected:
     st.session_state.answers = {}
     st.session_state.quiz_finished = False
     st.session_state.results = None
+    st.rerun()
 
 df = st.session_state.filtered_df
 idx = st.session_state.current_idx
@@ -96,7 +95,7 @@ if st.session_state.quiz_finished:
     if st.button("🔁 처음부터 다시 시작하기"):
         for key in list(st.session_state.keys()):
             del st.session_state[key]
-        st.experimental_rerun()
+        st.rerun()
 
 # ===== 진행 중 =====
 else:
@@ -115,7 +114,7 @@ else:
         if idx < len(df) - 1:
             if st.button("➡ 다음 문제"):
                 st.session_state.current_idx += 1
-                st.experimental_rerun()
+                st.rerun()
         else:
             st.write("마지막 문제입니다.")
 
@@ -144,7 +143,6 @@ else:
                 "category_stats": category_stats
             }
             st.session_state.quiz_finished = True
-            st.experimental_rerun()
-
+            st.rerun()
 
 
