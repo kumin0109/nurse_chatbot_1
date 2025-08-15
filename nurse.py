@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -6,11 +7,20 @@ from sklearn.metrics.pairwise import cosine_similarity
 from openai import OpenAI
 from collections import defaultdict
 
-# 🔐 OpenAI API 클라이언트 생성 (Streamlit Secrets 사용)
-api_key = st.secrets["OPENAI_API_KEY"]
+# =========================
+# 🔐 OpenAI API 클라이언트 생성
+# =========================
+api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
+
+if not api_key:
+    st.error("❌ OpenAI API 키가 설정되어 있지 않습니다. Streamlit secrets 또는 환경 변수에 키를 추가하세요.")
+    st.stop()
+
 client = OpenAI(api_key=api_key)
 
+# =========================
 # 📥 CSV 불러오기 (캐싱)
+# =========================
 @st.cache_data
 def load_data():
     df = pd.read_csv("nurse_2_with_embeddings.csv")
@@ -18,7 +28,9 @@ def load_data():
     df["Etc"] = df[["Category1", "Category2", "Department"]].fillna("").astype(str).agg(";".join, axis=1)
     return df
 
+# =========================
 # 텍스트 → 벡터 변환
+# =========================
 def embed_text(text):
     response = client.embeddings.create(
         input=text,
@@ -26,14 +38,18 @@ def embed_text(text):
     )
     return response.data[0].embedding
 
+# =========================
 # 유사도 계산
+# =========================
 def find_most_similar(user_embedding, df):
     all_embeddings = np.array(df["Embedding"].to_list())
     sims = cosine_similarity([user_embedding], all_embeddings)[0]
     best_idx = int(np.argmax(sims))
     return df.iloc[best_idx], sims[best_idx]
 
+# =========================
 # 페이지 설정
+# =========================
 st.set_page_config(page_title="간호사 상황극 문제은행", page_icon="🩺")
 st.title("🩺 간호사 100문 100답 - 카테고리 선택 문제은행")
 
@@ -160,5 +176,7 @@ else:
             }
             st.session_state.quiz_finished = True
             st.experimental_rerun()
+
+
 
 
