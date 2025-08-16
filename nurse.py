@@ -107,7 +107,7 @@ if st.session_state.quiz_finished:
     if st.button("🔁 처음부터 다시 시작하기"):
         for key in list(st.session_state.keys()):
             del st.session_state[key]
-        st.experimental_rerun()
+        st.rerun()
 
 # ===== 진행 중 =====
 else:
@@ -151,7 +151,7 @@ else:
         if idx < len(df) - 1:
             if st.button("➡ 다음 문제"):
                 st.session_state.current_idx += 1
-                st.experimental_rerun()
+                st.rerun()
         else:
             st.write("마지막 문제입니다.")
 
@@ -174,6 +174,7 @@ else:
                 "category_stats": st.session_state.category_stats
             }
             st.session_state.quiz_finished = True
-            st.experimental_rerun()
+            st.rerun()
+
 
 
