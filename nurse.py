@@ -258,7 +258,8 @@ else:
     if st.button("🔁 처음부터 다시 시작하기"):
         for key in list(st.session_state.keys()):
             del st.session_state[key]
-        st.experimental_rerun()
+        st.rerun()   # ✅ 최신 문법
+
 
 
 
