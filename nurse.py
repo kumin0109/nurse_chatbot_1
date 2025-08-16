@@ -22,7 +22,7 @@ client = OpenAI(api_key=API_KEY)
 @st.cache_data
 def load_data():
     try:
-        df = pd.read_csv("nurse_2_with_embeddings.csv")   # ✅ 파일명 변경됨
+        df = pd.read_csv("nurse_2_with_embeddings.csv")   # ✅ 파일명 고정
     except FileNotFoundError:
         st.error("CSV 파일 'nurse_2_with_embeddings.csv' 를 찾을 수 없습니다. 파일을 앱 루트에 업로드하세요.")
         st.stop()
@@ -139,13 +139,8 @@ if "quiz_finished" not in st.session_state:
     st.session_state.quiz_finished = False
 
 # ====================== 카테고리 필터 ======================
-all_categories = set()
-for etc in st.session_state.raw_df.get("Etc", []):
-    for e in str(etc).split(";"):
-        e = e.strip()
-        if e:
-            all_categories.add(e)
-
+# 👉 Category1 기준으로 카테고리 선택
+all_categories = set(st.session_state.raw_df["Category1"].dropna().unique())
 category_options = ["전체"] + sorted(list(all_categories))
 selected = st.selectbox("📂 푸실 문제 카테고리를 선택하세요:", category_options)
 
@@ -157,7 +152,7 @@ if selected != st.session_state.category_selected:
             st.session_state.raw_df.sample(frac=1, random_state=None).reset_index(drop=True)
         )
     else:
-        mask = st.session_state.raw_df["Etc"].apply(lambda x: selected in str(x))
+        mask = st.session_state.raw_df["Category1"] == selected
         st.session_state.filtered_df = (
             st.session_state.raw_df[mask].sample(frac=1, random_state=None).reset_index(drop=True)
         )
@@ -182,7 +177,7 @@ if not st.session_state.quiz_finished:
     # 컬럼 이름 방어코드
     q_col = "Question" if "Question" in df.columns else df.columns[0]
     a_col = "Answer"   if "Answer"   in df.columns else df.columns[1]
-    e_col = "Etc"      if "Etc"      in df.columns else (df.columns[2] if len(df.columns) > 2 else None)
+    e_col = "Category1"  # ✅ Category1을 카테고리로 사용
 
     st.markdown(f"**문제 {idx + 1}:** {row[q_col]}")
     user_input = st.text_area("🧑‍⚕️ 당신의 간호사 응답은?", key=f"input_{idx}_{selected}")
@@ -224,17 +219,12 @@ if not st.session_state.quiz_finished:
 
                 # 항상 '현재 질문'의 정답 예시를 보여줌(동일 질문 중 가장 가까운 것)
                 st.markdown(f"**정답 예시:**\n> {best_match[a_col]}")
-                if e_col:
-                    st.caption(f"🗂️ 카테고리: {str(row[e_col])}")  # 통계는 현재 문제의 카테고리 기준
+                st.caption(f"🗂️ 카테고리: {str(row[e_col])}")
 
                 # 카테고리 통계 집계(현재 문제 기준)
-                if e_col:
-                    for category in str(row[e_col]).split(";"):
-                        category = category.strip()
-                        if category:
-                            st.session_state.category_stats[category]["total"] += 1
-                            if is_correct:
-                                st.session_state.category_stats[category]["correct"] += 1
+                st.session_state.category_stats[row[e_col]]["total"] += 1
+                if is_correct:
+                    st.session_state.category_stats[row[e_col]]["correct"] += 1
 
             except Exception as e:
                 st.error(f"채점 중 오류가 발생했습니다: {e}")
@@ -269,5 +259,6 @@ else:
         for key in list(st.session_state.keys()):
             del st.session_state[key]
         st.experimental_rerun()
+
 
 
