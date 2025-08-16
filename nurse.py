@@ -22,7 +22,7 @@ client = OpenAI(api_key=API_KEY)
 @st.cache_data
 def load_data():
     try:
-        df = pd.read_csv("nurse_2_with_embeddings.csv")  # ✅ 파일명 변경됨
+        df = pd.read_csv("nurse_2_with_embeddings.csv")   # ✅ 파일명 변경됨
     except FileNotFoundError:
         st.error("CSV 파일 'nurse_2_with_embeddings.csv' 를 찾을 수 없습니다. 파일을 앱 루트에 업로드하세요.")
         st.stop()
@@ -65,6 +65,12 @@ def load_data():
 
 # ====================== 임베딩 함수 ======================
 def embed_text(text: str, target_dim: int):
+    """
+    CSV에 저장된 임베딩 차원(target_dim)에 맞춰 새 임베딩 생성.
+    - 1536: text-embedding-3-small (기본 1536)
+    - 3072: text-embedding-3-large (기본 3072)
+    - 기타: large + dimensions=target_dim 로 맞춤
+    """
     if target_dim == 1536:
         resp = client.embeddings.create(
             model="text-embedding-3-small",
@@ -85,6 +91,11 @@ def embed_text(text: str, target_dim: int):
 
 # ====================== 채점(질문 단위) ======================
 def score_for_question(user_embedding, raw_df, current_row, target_dim, q_col, a_col):
+    """
+    사용자 답변 임베딩을 '현재 질문'의 정답(들)과만 비교.
+    - 같은 질문 텍스트가 여러 행에 있으면 모두 후보로 사용.
+    - 없을 경우 현재 행만 사용.
+    """
     user = np.asarray(user_embedding, dtype=np.float32).reshape(1, -1)
 
     mask_same_q = raw_df[q_col].astype(str) == str(current_row[q_col])
@@ -138,6 +149,7 @@ for etc in st.session_state.raw_df.get("Etc", []):
 category_options = ["전체"] + sorted(list(all_categories))
 selected = st.selectbox("📂 푸실 문제 카테고리를 선택하세요:", category_options)
 
+# 카테고리 변경 시 필터링 & 상태 리셋
 if selected != st.session_state.category_selected:
     st.session_state.category_selected = selected
     if selected == "전체":
@@ -159,6 +171,7 @@ if selected != st.session_state.category_selected:
 df = st.session_state.filtered_df
 idx = st.session_state.current_idx
 
+# 퀴즈 완료 여부
 if idx >= len(df):
     st.session_state.quiz_finished = True
 
@@ -166,6 +179,7 @@ if idx >= len(df):
 if not st.session_state.quiz_finished:
     row = df.iloc[idx]
 
+    # 컬럼 이름 방어코드
     q_col = "Question" if "Question" in df.columns else df.columns[0]
     a_col = "Answer"   if "Answer"   in df.columns else df.columns[1]
     e_col = "Etc"      if "Etc"      in df.columns else (df.columns[2] if len(df.columns) > 2 else None)
@@ -182,11 +196,13 @@ if not st.session_state.quiz_finished:
     if submit_clicked and user_input.strip():
         with st.spinner("AI가 채점 중입니다..."):
             try:
+                # 1) 사용자 답변 임베딩(차원 자동 맞춤)
                 user_embedding = embed_text(user_input, st.session_state.embed_dim)
 
+                # 2) '현재 질문'의 정답(들)과만 비교
                 best_match, similarity = score_for_question(
                     user_embedding,
-                    st.session_state.raw_df,
+                    st.session_state.raw_df,  # 전체 원본에서 같은 질문 행을 모음
                     row,
                     st.session_state.embed_dim,
                     q_col,
@@ -206,10 +222,12 @@ if not st.session_state.quiz_finished:
                 else:
                     st.error(f"❌ 오답입니다. 유사도 {similarity:.2f}")
 
+                # 항상 '현재 질문'의 정답 예시를 보여줌(동일 질문 중 가장 가까운 것)
                 st.markdown(f"**정답 예시:**\n> {best_match[a_col]}")
                 if e_col:
-                    st.caption(f"🗂️ 카테고리: {str(row[e_col])}")
+                    st.caption(f"🗂️ 카테고리: {str(row[e_col])}")  # 통계는 현재 문제의 카테고리 기준
 
+                # 카테고리 통계 집계(현재 문제 기준)
                 if e_col:
                     for category in str(row[e_col]).split(";"):
                         category = category.strip()
@@ -251,4 +269,5 @@ else:
         for key in list(st.session_state.keys()):
             del st.session_state[key]
         st.experimental_rerun()
+
 
