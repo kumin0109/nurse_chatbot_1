@@ -130,12 +130,15 @@ else:
                     if user_embedding:
                         best_match, similarity = find_most_similar(user_embedding, df)
 
-                        is_correct = similarity >= 0.65
-                        if is_correct:
+                        # ✅ 수정됨: 유사도 기준 완화 + '거의 맞음'도 정답 처리
+                        if similarity >= 0.6:
+                            is_correct = True
                             st.success(f"✅ 정답입니다! (유사도: {similarity:.2f})")
                         elif similarity >= 0.55:
+                            is_correct = True  # '거의 맞음'도 정답 인정
                             st.info(f"🟡 거의 맞았습니다. (유사도: {similarity:.2f})")
                         else:
+                            is_correct = False
                             st.error(f"❌ 오답입니다. (유사도: {similarity:.2f})")
 
                         st.markdown(f"**정답 예시:** {best_match['Answer']}")
@@ -166,7 +169,8 @@ else:
                         sim = cosine_similarity(
                             [emb], np.array(df["Embedding"].to_list())
                         )[0].max()
-                        if sim >= 0.65:
+                        # ✅ 수정됨: 최종 채점도 완화된 기준 반영
+                        if sim >= 0.55:
                             correct_count += 1
 
             st.session_state.results = {
@@ -175,6 +179,5 @@ else:
             }
             st.session_state.quiz_finished = True
             st.rerun()
-
 
 
