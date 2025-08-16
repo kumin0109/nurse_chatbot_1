@@ -35,13 +35,6 @@ def embed_text(text: str) -> list:
         st.error(f"임베딩 생성 중 오류 발생: {e}")
         return None
 
-# 🎯 유사도 계산
-def find_most_similar(user_embedding, df):
-    all_embeddings = np.array(df["Embedding"].to_list())
-    sims = cosine_similarity([user_embedding], all_embeddings)[0]
-    best_idx = int(np.argmax(sims))
-    return df.iloc[best_idx], sims[best_idx]
-
 # 페이지 설정
 st.set_page_config(page_title="간호사 상황극 문제은행", page_icon="🩺")
 st.title("🩺 간호사 100문 100답 - 카테고리 선택 문제은행")
@@ -128,23 +121,26 @@ else:
                 with st.spinner("AI가 채점 중입니다..."):
                     user_embedding = embed_text(answer)
                     if user_embedding:
-                        best_match, similarity = find_most_similar(user_embedding, df)
+                        # ✅ 현재 문제(row)의 정답과만 비교
+                        correct_embedding = np.array(row["Embedding"]).reshape(1, -1)
+                        similarity = cosine_similarity([user_embedding], correct_embedding)[0][0]
 
-                        is_correct = similarity >= 0.65
-                        if is_correct:
+                        # 채점 결과 표시
+                        if similarity >= 0.65:
                             st.success(f"✅ 정답입니다! (유사도: {similarity:.2f})")
                         elif similarity >= 0.55:
                             st.info(f"🟡 거의 맞았습니다. (유사도: {similarity:.2f})")
                         else:
                             st.error(f"❌ 오답입니다. (유사도: {similarity:.2f})")
 
-                        st.markdown(f"**정답 예시:** {best_match['Answer']}")
-                        st.caption(f"🗂️ 카테고리: {best_match['Etc']}")
+                        # ✅ 항상 현재 문제의 정답 예시만 출력
+                        st.markdown(f"**정답 예시:** {row['Answer']}")
+                        st.caption(f"🗂️ 카테고리: {row['Etc']}")
 
                         # 카테고리별 통계
-                        st.session_state.category_stats[best_match["Etc"]]["total"] += 1
-                        if is_correct:
-                            st.session_state.category_stats[best_match["Etc"]]["correct"] += 1
+                        st.session_state.category_stats[row["Etc"]]["total"] += 1
+                        if similarity >= 0.65:
+                            st.session_state.category_stats[row["Etc"]]["correct"] += 1
 
     # 다음 문제
     with col2:
@@ -164,8 +160,8 @@ else:
                     emb = embed_text(ans)
                     if emb is not None:
                         sim = cosine_similarity(
-                            [emb], np.array(df["Embedding"].to_list())
-                        )[0].max()
+                            [emb], np.array(df.iloc[i]["Embedding"]).reshape(1, -1)
+                        )[0][0]
                         if sim >= 0.65:
                             correct_count += 1
 
@@ -175,3 +171,4 @@ else:
             }
             st.session_state.quiz_finished = True
             st.rerun()
+
