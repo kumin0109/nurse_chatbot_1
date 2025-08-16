@@ -1,174 +1,254 @@
-import streamlit as st
-import pandas as pd
-import numpy as np
-import ast
 import os
+import ast
+import numpy as np
+import pandas as pd
+import streamlit as st
+from collections import defaultdict
 from sklearn.metrics.pairwise import cosine_similarity
 from openai import OpenAI
-from collections import defaultdict
 
-# 🔐 OpenAI API 키 설정 (st.secrets 없으면 환경변수 사용)
-api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
-if not api_key:
-    st.error("❌ OpenAI API Key가 설정되지 않았습니다. secrets 또는 환경변수를 확인하세요.")
+# ====================== 공통 설정 ======================
+st.set_page_config(page_title="간호사 상황극 문제은행", page_icon="🩺")
+
+# 🔐 OpenAI 키: 환경변수 우선 → 없으면 Streamlit secrets
+API_KEY = os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY")
+if not API_KEY:
+    st.error("OPENAI_API_KEY가 설정되지 않았습니다. Streamlit Secrets(⋮ → Settings → Secrets) 또는 환경변수로 추가하세요.")
     st.stop()
 
-client = OpenAI(api_key=api_key)
+client = OpenAI(api_key=API_KEY)
 
-# 📥 CSV 불러오기 (캐싱)
+# ====================== 데이터 로딩 ======================
 @st.cache_data
 def load_data():
-    df = pd.read_csv("nurse_2_with_embeddings.csv")
-    df["Embedding"] = df["Embedding"].apply(ast.literal_eval)
-    df["Etc"] = df[["Category1", "Category2", "Department"]].fillna("").astype(str).agg(";".join, axis=1)
-    return df
-
-# 🧠 텍스트 → 임베딩 변환
-def embed_text(text: str) -> list:
     try:
-        response = client.embeddings.create(
-            model="text-embedding-3-large",
-            input=text
-        )
-        return response.data[0].embedding
-    except Exception as e:
-        st.error(f"임베딩 생성 중 오류 발생: {e}")
-        return None
+        df = pd.read_csv("nurse_2_with_embeddings.csv")  # ✅ 파일명 변경됨
+    except FileNotFoundError:
+        st.error("CSV 파일 'nurse_2_with_embeddings.csv' 를 찾을 수 없습니다. 파일을 앱 루트에 업로드하세요.")
+        st.stop()
 
-# 페이지 설정
-st.set_page_config(page_title="간호사 상황극 문제은행", page_icon="🩺")
+    if "Embedding" not in df.columns:
+        st.error("CSV에 'Embedding' 컬럼이 없습니다. 임베딩 컬럼명을 확인하세요.")
+        st.stop()
+
+    # Embedding 컬럼: 문자열 → 리스트
+    def to_list(x):
+        if isinstance(x, list):
+            return x
+        if isinstance(x, str):
+            try:
+                return ast.literal_eval(x)
+            except Exception:
+                return x
+        return x
+
+    df["Embedding"] = df["Embedding"].apply(to_list)
+
+    if len(df) == 0:
+        st.error("CSV가 비어 있습니다.")
+        st.stop()
+
+    first = df["Embedding"].iloc[0]
+    if not isinstance(first, (list, tuple)):
+        st.error("Embedding 컬럼이 리스트 형태가 아닙니다. 예: [0.1, 0.2, ...]")
+        st.stop()
+
+    embed_dim = len(first)
+
+    # 행별 길이 불일치 제거(있다면 경고)
+    bad = df["Embedding"].apply(lambda v: len(v) != embed_dim)
+    if bad.any():
+        st.warning(f"임베딩 길이가 다른 행 {bad.sum()}개를 발견했습니다. 해당 행은 제외합니다.")
+        df = df.loc[~bad].reset_index(drop=True)
+
+    return df, embed_dim
+
+# ====================== 임베딩 함수 ======================
+def embed_text(text: str, target_dim: int):
+    if target_dim == 1536:
+        resp = client.embeddings.create(
+            model="text-embedding-3-small",
+            input=[text]
+        )
+    elif target_dim == 3072:
+        resp = client.embeddings.create(
+            model="text-embedding-3-large",
+            input=[text]
+        )
+    else:
+        resp = client.embeddings.create(
+            model="text-embedding-3-large",
+            input=[text],
+            dimensions=target_dim
+        )
+    return resp.data[0].embedding
+
+# ====================== 채점(질문 단위) ======================
+def score_for_question(user_embedding, raw_df, current_row, target_dim, q_col, a_col):
+    user = np.asarray(user_embedding, dtype=np.float32).reshape(1, -1)
+
+    mask_same_q = raw_df[q_col].astype(str) == str(current_row[q_col])
+    subset = raw_df.loc[mask_same_q]
+
+    if subset.empty:
+        subset = pd.DataFrame([current_row])
+
+    cand_mat = np.vstack(subset["Embedding"].apply(lambda v: np.asarray(v, dtype=np.float32)))
+    if cand_mat.shape[1] != target_dim or user.shape[1] != target_dim:
+        raise ValueError(
+            f"임베딩 차원 불일치: CSV={cand_mat.shape[1]}, QUERY={user.shape[1]}"
+        )
+
+    sims = cosine_similarity(user, cand_mat)[0]
+    best_idx = int(np.argmax(sims))
+    best_row = subset.iloc[best_idx]
+    return best_row, float(sims[best_idx])
+
+# ====================== 앱 상태 초기화 ======================
 st.title("🩺 간호사 100문 100답 - 카테고리 선택 문제은행")
 
-# === 세션 초기화 ===
 if "raw_df" not in st.session_state:
-    st.session_state.raw_df = load_data()
+    st.session_state.raw_df, st.session_state.embed_dim = load_data()
+
 if "category_selected" not in st.session_state:
     st.session_state.category_selected = "전체"
 if "filtered_df" not in st.session_state:
     st.session_state.filtered_df = st.session_state.raw_df.copy()
 if "current_idx" not in st.session_state:
     st.session_state.current_idx = 0
-if "answers" not in st.session_state:
-    st.session_state.answers = {}
-if "quiz_finished" not in st.session_state:
-    st.session_state.quiz_finished = False
-if "results" not in st.session_state:
-    st.session_state.results = None
+if "correct_count" not in st.session_state:
+    st.session_state.correct_count = 0
+if "total_count" not in st.session_state:
+    st.session_state.total_count = 0
+if "solved_ids" not in st.session_state:
+    st.session_state.solved_ids = []
 if "category_stats" not in st.session_state:
     st.session_state.category_stats = defaultdict(lambda: {"correct": 0, "total": 0})
+if "quiz_finished" not in st.session_state:
+    st.session_state.quiz_finished = False
 
-# === 카테고리 목록 ===
+# ====================== 카테고리 필터 ======================
 all_categories = set()
-for etc in st.session_state.raw_df["Etc"]:
-    all_categories.update([e.strip() for e in str(etc).split(";") if e.strip()])
+for etc in st.session_state.raw_df.get("Etc", []):
+    for e in str(etc).split(";"):
+        e = e.strip()
+        if e:
+            all_categories.add(e)
 
 category_options = ["전체"] + sorted(list(all_categories))
 selected = st.selectbox("📂 푸실 문제 카테고리를 선택하세요:", category_options)
 
-# === 카테고리 변경 시 필터링 ===
 if selected != st.session_state.category_selected:
     st.session_state.category_selected = selected
     if selected == "전체":
-        st.session_state.filtered_df = st.session_state.raw_df.sample(frac=1).reset_index(drop=True)
+        st.session_state.filtered_df = (
+            st.session_state.raw_df.sample(frac=1, random_state=None).reset_index(drop=True)
+        )
     else:
         mask = st.session_state.raw_df["Etc"].apply(lambda x: selected in str(x))
-        st.session_state.filtered_df = st.session_state.raw_df[mask].sample(frac=1).reset_index(drop=True)
+        st.session_state.filtered_df = (
+            st.session_state.raw_df[mask].sample(frac=1, random_state=None).reset_index(drop=True)
+        )
     st.session_state.current_idx = 0
-    st.session_state.answers = {}
-    st.session_state.quiz_finished = False
-    st.session_state.results = None
+    st.session_state.correct_count = 0
+    st.session_state.total_count = 0
+    st.session_state.solved_ids = []
     st.session_state.category_stats = defaultdict(lambda: {"correct": 0, "total": 0})
+    st.session_state.quiz_finished = False
 
 df = st.session_state.filtered_df
 idx = st.session_state.current_idx
 
-# ===== 퀴즈 완료 시 =====
-if st.session_state.quiz_finished:
-    correct_count = st.session_state.results["correct"]
-    total_count = len(st.session_state.answers)
-    st.success("🎉 채점이 완료되었습니다!")
-    st.markdown(f"- 총 푼 문제 수: **{total_count}**")
-    st.markdown(f"- 맞힌 문제 수: **{correct_count}**")
-    st.markdown(f"- 정답률: **{(correct_count/total_count)*100:.1f}%**")
+if idx >= len(df):
+    st.session_state.quiz_finished = True
 
+# ====================== 문제 풀이 ======================
+if not st.session_state.quiz_finished:
+    row = df.iloc[idx]
+
+    q_col = "Question" if "Question" in df.columns else df.columns[0]
+    a_col = "Answer"   if "Answer"   in df.columns else df.columns[1]
+    e_col = "Etc"      if "Etc"      in df.columns else (df.columns[2] if len(df.columns) > 2 else None)
+
+    st.markdown(f"**문제 {idx + 1}:** {row[q_col]}")
+    user_input = st.text_area("🧑‍⚕️ 당신의 간호사 응답은?", key=f"input_{idx}_{selected}")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        submit_clicked = st.button("정답 제출", type="primary")
+    with col2:
+        next_clicked = st.button("다음 문제")
+
+    if submit_clicked and user_input.strip():
+        with st.spinner("AI가 채점 중입니다..."):
+            try:
+                user_embedding = embed_text(user_input, st.session_state.embed_dim)
+
+                best_match, similarity = score_for_question(
+                    user_embedding,
+                    st.session_state.raw_df,
+                    row,
+                    st.session_state.embed_dim,
+                    q_col,
+                    a_col
+                )
+
+                st.session_state.total_count += 1
+                st.session_state.solved_ids.append(idx)
+
+                is_correct = False
+                if similarity >= 0.8:
+                    st.session_state.correct_count += 1
+                    st.success(f"✅ 정답입니다! 유사도 {similarity:.2f}")
+                    is_correct = True
+                elif similarity >= 0.6:
+                    st.info(f"🟡 거의 맞았어요! 유사도 {similarity:.2f}")
+                else:
+                    st.error(f"❌ 오답입니다. 유사도 {similarity:.2f}")
+
+                st.markdown(f"**정답 예시:**\n> {best_match[a_col]}")
+                if e_col:
+                    st.caption(f"🗂️ 카테고리: {str(row[e_col])}")
+
+                if e_col:
+                    for category in str(row[e_col]).split(";"):
+                        category = category.strip()
+                        if category:
+                            st.session_state.category_stats[category]["total"] += 1
+                            if is_correct:
+                                st.session_state.category_stats[category]["correct"] += 1
+
+            except Exception as e:
+                st.error(f"채점 중 오류가 발생했습니다: {e}")
+
+    if next_clicked:
+        st.session_state.current_idx += 1
+
+# ====================== 퀴즈 완료 ======================
+else:
+    st.success("🎉 모든 문제를 완료했습니다!")
+
+    st.subheader("📊 최종 결과 요약")
+    correct = st.session_state.correct_count
+    total = st.session_state.total_count
+    st.markdown(f"- 총 문제 수: **{total}**")
+    st.markdown(f"- 맞힌 문제 수: **{correct}**")
+    if total > 0:
+        st.markdown(f"- 정답률: **{(correct/total)*100:.1f}%**")
+    else:
+        st.markdown("- 정답률: **0.0%**")
+
+    st.markdown("---")
     st.subheader("🧾 카테고리별 정답 통계")
-    for cat, stat in st.session_state.results["category_stats"].items():
+    stats = st.session_state.category_stats
+    for cat, stat in stats.items():
         if stat["total"] > 0:
             rate = stat["correct"] / stat["total"] * 100
             st.write(f"- **{cat}**: {stat['correct']} / {stat['total']} 정답 ({rate:.1f}%)")
 
+    st.markdown("---")
     if st.button("🔁 처음부터 다시 시작하기"):
         for key in list(st.session_state.keys()):
             del st.session_state[key]
-        st.rerun()
-
-# ===== 진행 중 =====
-else:
-    row = df.iloc[idx]
-    st.markdown(f"**문제 {idx + 1}/{len(df)}:** {row['Question']}")
-
-    answer = st.text_area("🧑‍⚕️ 당신의 간호사 응답은?",
-                          value=st.session_state.answers.get(idx, ""),
-                          key=f"input_{idx}")
-    st.session_state.answers[idx] = answer
-
-    col1, col2, col3 = st.columns(3)
-
-    # 정답 제출
-    with col1:
-        if st.button("✅ 제출하고 채점"):
-            if answer.strip():
-                with st.spinner("AI가 채점 중입니다..."):
-                    user_embedding = embed_text(answer)
-                    if user_embedding:
-                        # ✅ 현재 문제(row)의 정답과만 비교
-                        correct_embedding = np.array(row["Embedding"]).reshape(1, -1)
-                        similarity = cosine_similarity([user_embedding], correct_embedding)[0][0]
-
-                        # 채점 결과 표시
-                        if similarity >= 0.65:
-                            st.success(f"✅ 정답입니다! (유사도: {similarity:.2f})")
-                        elif similarity >= 0.55:
-                            st.info(f"🟡 거의 맞았습니다. (유사도: {similarity:.2f})")
-                        else:
-                            st.error(f"❌ 오답입니다. (유사도: {similarity:.2f})")
-
-                        # ✅ 항상 현재 문제의 정답 예시만 출력
-                        st.markdown(f"**정답 예시:** {row['Answer']}")
-                        st.caption(f"🗂️ 카테고리: {row['Etc']}")
-
-                        # 카테고리별 통계
-                        st.session_state.category_stats[row["Etc"]]["total"] += 1
-                        if similarity >= 0.65:
-                            st.session_state.category_stats[row["Etc"]]["correct"] += 1
-
-    # 다음 문제
-    with col2:
-        if idx < len(df) - 1:
-            if st.button("➡ 다음 문제"):
-                st.session_state.current_idx += 1
-                st.rerun()
-        else:
-            st.write("마지막 문제입니다.")
-
-    # 최종 결과
-    with col3:
-        if st.button("📊 최종 결과 보기"):
-            correct_count = 0
-            for i, ans in st.session_state.answers.items():
-                if ans.strip():
-                    emb = embed_text(ans)
-                    if emb is not None:
-                        sim = cosine_similarity(
-                            [emb], np.array(df.iloc[i]["Embedding"]).reshape(1, -1)
-                        )[0][0]
-                        if sim >= 0.65:
-                            correct_count += 1
-
-            st.session_state.results = {
-                "correct": correct_count,
-                "category_stats": st.session_state.category_stats
-            }
-            st.session_state.quiz_finished = True
-            st.rerun()
+        st.experimental_rerun()
 
